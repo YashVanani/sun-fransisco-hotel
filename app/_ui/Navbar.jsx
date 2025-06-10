@@ -12,8 +12,6 @@ function Navbar({ signOutAction }) {
   const pathname = usePathname();
   const { user } = useAuth();
 
-  console.log("user:::::::::", user);
-
   return (
     <header>
       <div className="container header-items">

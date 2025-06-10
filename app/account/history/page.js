@@ -1,63 +1,95 @@
+"use client";
 import { useAuth } from "@/app/_context/AuthContext";
 import { db } from "@/app/_lib/firebase/firebase";
 import Heading from "@/app/_ui/Heading";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import Loading from "@/app/loading";
+import {
+  collection,
+  doc,
+  getDoc,
+  onSnapshot,
+  query,
+  where,
+} from "firebase/firestore";
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import ReservationCard from "./_components/ReservationCard";
 import styles from "./style.module.css";
 
-export const metadata = {
-  title: "Booking History",
-  description: "Reservations history at the Hotel Booking App ",
+export const listenToUserReservationsWithRoomDetails = (
+  userId,
+  onDataUpdate
+) => {
+  const bookingsRef = collection(db, "room_bookings");
+  const q = query(bookingsRef, where("user_id", "==", userId));
+
+  const unsubscribe = onSnapshot(q, async (snapshot) => {
+    const reservations = await Promise.all(
+      snapshot.docs.map(async (docSnap) => {
+        const reservationData = docSnap.data();
+        const roomId = reservationData.room_id;
+
+        let roomData = null;
+        try {
+          const roomRef = doc(db, "room_details", roomId);
+          const roomSnap = await getDoc(roomRef);
+          roomData = roomSnap.exists() ? roomSnap.data() : null;
+        } catch (error) {
+          console.error("Error fetching room details:", error);
+        }
+
+        return {
+          id: docSnap.id,
+          ...reservationData,
+          room: roomData,
+        };
+      })
+    );
+
+    // ✅ Pass data back via callback
+    onDataUpdate(reservations);
+  });
+
+  return unsubscribe;
 };
 
-async function fetchUserReservations(userId) {
-  console.log("userId ::::::", userId);
-  try {
-    const bookingsRef = collection(db, "room_bookings");
-    const q = query(bookingsRef, where("user_id", "==", userId));
-    const snapshot = await getDocs(q);
-    console.log("snapshot:::::", snapshot);
+function History() {
+  const { user } = useAuth();
+  const [reservations, setReservations] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-    const reservations = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
-    console.log("reservations :::::::", reservations);
-    return reservations;
-  } catch (error) {
-    console.log("Error fetching reservations:", error);
-    return [];
-  }
-}
+  useEffect(() => {
+    if (!user?.uid) return;
 
-async function History() {
-  let reservations = [];
-  try {
-    const { user } = useAuth();
+    setLoading(true);
 
-    if (!user) {
-      console.log("No user is logged in.");
-      return (
-        <>
-          <Heading textClassName={styles.heading}>Your History</Heading>
-          <p>Please sign in to view your booking history.</p>
-        </>
-      );
-    }
+    const unsubscribe = listenToUserReservationsWithRoomDetails(
+      user.uid,
+      (data) => {
+        setReservations(data);
+        setLoading(false);
+      }
+    );
 
-    const userId = user.uid;
-    reservations = await fetchUserReservations(userId);
-    console.log("reservations :::::::::", reservations);
-  } catch (err) {
-    console.log(err);
+    return () => unsubscribe(); // Cleanup on unmount
+  }, [user]);
+
+  if (!user) {
+    return (
+      <>
+        <Heading textClassName={styles.heading}>Your History</Heading>
+        <p>Please sign in to view your booking history.</p>
+      </>
+    );
   }
 
   return (
     <>
       <Heading textClassName={styles.heading}>Your History</Heading>
       <div>
-        {reservations.length ? (
+        {loading ? (
+          <Loading />
+        ) : reservations?.length ? (
           reservations
             .reverse()
             .map((item) => <ReservationCard key={item.id} reservation={item} />)
